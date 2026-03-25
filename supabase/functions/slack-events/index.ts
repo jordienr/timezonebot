@@ -55,6 +55,27 @@ async function verifySlackSignature(
 
 const userCache = new Map<string, { tz: string; name: string; isBot: boolean }>();
 
+// ─── Event deduplication cache ──────────────────────────────────────────────
+
+const processedEvents = new Map<string, number>(); // event_id -> timestamp
+
+function isDuplicateEvent(eventId: string): boolean {
+  // Clean up old entries (older than 5 minutes)
+  const fiveMinutesAgo = Date.now() - 300000;
+  for (const [id, timestamp] of processedEvents.entries()) {
+    if (timestamp < fiveMinutesAgo) {
+      processedEvents.delete(id);
+    }
+  }
+
+  if (processedEvents.has(eventId)) {
+    return true;
+  }
+
+  processedEvents.set(eventId, Date.now());
+  return false;
+}
+
 async function getUserInfo(token: string, userId: string) {
   if (userCache.has(userId)) return userCache.get(userId)!;
 
@@ -88,10 +109,59 @@ async function getUserInfo(token: string, userId: string) {
   return info;
 }
 
+// ─── Thread participants ─────────────────────────────────────────────────────
+
+async function getThreadParticipants(
+  token: string,
+  channelId: string,
+  threadTs: string,
+): Promise<string[]> {
+  const participants = new Set<string>();
+
+  try {
+    const url = `https://slack.com/api/conversations.replies?channel=${channelId}&ts=${threadTs}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      console.error(`Failed to fetch thread replies: ${res.status}`);
+      return [];
+    }
+
+    const data = await res.json();
+    if (!data.ok || !data.messages) {
+      console.error(`Slack API error fetching thread: ${data.error}`);
+      return [];
+    }
+
+    // Collect all users who participated in the thread
+    for (const message of data.messages) {
+      if (message.user && isValidSlackUserId(message.user)) {
+        participants.add(message.user);
+      }
+      // Also collect @mentioned users
+      if (message.text) {
+        const mentionMatches = message.text.matchAll(/<@([A-Z0-9]+)>/g);
+        for (const match of mentionMatches) {
+          if (isValidSlackUserId(match[1])) {
+            participants.add(match[1]);
+          }
+        }
+      }
+    }
+
+    return Array.from(participants);
+  } catch (err) {
+    console.error("Error fetching thread participants:", err);
+    return [];
+  }
+}
+
 // ─── Core processing ─────────────────────────────────────────────────────────
 
 async function processMessage(event: Record<string, string>, token: string) {
-  const { user: senderId, channel: channelId, text, thread_ts } = event;
+  const { user: senderId, channel: channelId, text, thread_ts, ts } = event;
 
   // 0. Validate Slack IDs
   if (!isValidSlackUserId(senderId)) {
@@ -115,43 +185,52 @@ async function processMessage(event: Record<string, string>, token: string) {
   const senderTz = senderInfo.tz;
   console.log(`Sender ${senderInfo.name} timezone: ${senderTz}`);
 
-  // 4. Get channel members (with pagination)
-  const members: string[] = [];
-  let cursor: string | undefined;
-  let attempts = 0;
-  const MAX_PAGES = 10; // Limit to 2000 members (200 * 10)
+  // 4. Get target audience (thread participants or all channel members)
+  let members: string[] = [];
 
-  do {
-    const url = cursor
-      ? `https://slack.com/api/conversations.members?channel=${channelId}&limit=200&cursor=${cursor}`
-      : `https://slack.com/api/conversations.members?channel=${channelId}&limit=200`;
+  if (thread_ts) {
+    // In a thread - only translate for thread participants
+    console.log(`Message is in a thread (${thread_ts}), fetching participants only`);
+    members = await getThreadParticipants(token, channelId, thread_ts);
+    console.log(`Found ${members.length} thread participants`);
+  } else {
+    // Regular channel message - get all channel members (with pagination)
+    let cursor: string | undefined;
+    let attempts = 0;
+    const MAX_PAGES = 10; // Limit to 2000 members (200 * 10)
 
-    const membersRes = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    do {
+      const url = cursor
+        ? `https://slack.com/api/conversations.members?channel=${channelId}&limit=200&cursor=${cursor}`
+        : `https://slack.com/api/conversations.members?channel=${channelId}&limit=200`;
 
-    if (!membersRes.ok) {
-      console.error(`Slack API HTTP error: ${membersRes.status} for channel ${channelId}`);
-      throw new Error(`Slack API error: ${membersRes.status}`);
-    }
+      const membersRes = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-    const membersData = await membersRes.json();
-
-    if (!membersData.ok) {
-      console.error(`Slack API error: ${membersData.error} for channel ${channelId}`);
-      if (membersData.error === "rate_limited") {
-        const retryAfter = membersRes.headers.get("Retry-After");
-        console.error(`Rate limited. Retry after: ${retryAfter}s`);
+      if (!membersRes.ok) {
+        console.error(`Slack API HTTP error: ${membersRes.status} for channel ${channelId}`);
+        throw new Error(`Slack API error: ${membersRes.status}`);
       }
-      throw new Error(`Slack API error: ${membersData.error}`);
-    }
 
-    members.push(...(membersData.members || []));
-    cursor = membersData.response_metadata?.next_cursor;
-    attempts++;
-  } while (cursor && attempts < MAX_PAGES);
+      const membersData = await membersRes.json();
 
-  // 5. For each member, fetch their tz and send ephemeral if different
+      if (!membersData.ok) {
+        console.error(`Slack API error: ${membersData.error} for channel ${channelId}`);
+        if (membersData.error === "rate_limited") {
+          const retryAfter = membersRes.headers.get("Retry-After");
+          console.error(`Rate limited. Retry after: ${retryAfter}s`);
+        }
+        throw new Error(`Slack API error: ${membersData.error}`);
+      }
+
+      members.push(...(membersData.members || []));
+      cursor = membersData.response_metadata?.next_cursor;
+      attempts++;
+    } while (cursor && attempts < MAX_PAGES);
+  }
+
+  // 5. For each target member, fetch their tz and send ephemeral
   // Batch users.info calls in parallel (max 10 at a time to avoid rate limits)
   const otherMembers = members
     .filter((id) => id !== senderId)
@@ -340,6 +419,12 @@ Deno.serve(async (req) => {
   if (!valid) {
     console.error("Invalid Slack signature");
     return new Response("Unauthorized", { status: 401 });
+  }
+
+  // Check for duplicate events (Slack can retry)
+  if (payload.event_id && isDuplicateEvent(payload.event_id)) {
+    console.log(`Duplicate event detected: ${payload.event_id}`);
+    return new Response("ok", { status: 200 });
   }
 
   const event = payload.event;
