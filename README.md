@@ -91,6 +91,7 @@ When someone mentions a time in Slack, the bot:
 1. Detects time patterns in messages automatically
 2. Sends each person a private ephemeral message (only visible to them) with the time converted to their timezone
 3. Everyone sees the conversion that applies to them - no clutter in the channel
+4. **Thread-aware:** In threads, only translates for people who participated or were @mentioned (not the whole channel)
 
 The bot uses each user's timezone from their Slack profile, so setup is instant after inviting it to a channel.
 
@@ -110,7 +111,7 @@ Others see the time converted to their timezone:
 
 **Thread intelligence - Sender's view**
 
-In threads, only thread participants get translations:
+In threads, only people who participated or were @mentioned in the thread receive translations. Your confirmation message lists exactly who received the translation (not the entire channel):
 
 <img src="static/thread_intelligence_sender_pov.png" width="600" alt="Thread sender view showing only thread participants received translations">
 
