@@ -15,9 +15,13 @@ export interface Conversion {
 
 // ─── Regex pre-filter ────────────────────────────────────────────────────────
 // Quick bail-out: does the message even contain a time-like pattern?
-const PREFILTER = /\b(\d{1,2}(:\d{2})?\s*(am|pm)|noon|midnight|tomorrow|today)\b/i;
+const PREFILTER = /\b(\d{1,2}:\d{2}|\d{1,2}\s*(am|pm)|noon|midnight|tomorrow|today)\b/i;
+
+// Max input length to prevent ReDoS attacks
+const MAX_TEXT_LENGTH = 5000;
 
 export function mightHaveTimes(text: string): boolean {
+  if (!text || text.length > MAX_TEXT_LENGTH) return false;
   return PREFILTER.test(text);
 }
 
@@ -31,11 +35,18 @@ const TIME_RE =
   /(?:(today|tomorrow|next\s+\w+|\b(?:mon|tues?|wednes?|thurs?|fri|satur?|sun)(?:day)?)\s+(?:at\s+)?)?(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)|(?:(today|tomorrow|next\s+\w+|\b(?:mon|tues?|wednes?|thurs?|fri|satur?|sun)(?:day)?)\s+(?:at\s+)?)?(?:at\s+)?(\d{1,2}):(\d{2})(?!\s*(?:am|pm))|\b(noon|midnight)\b/gi;
 
 export function extractTimes(text: string): TimeMention[] {
+  // Prevent ReDoS by limiting input length
+  if (!text || text.length > MAX_TEXT_LENGTH) return [];
+
   const results: TimeMention[] = [];
   let match: RegExpExecArray | null;
   TIME_RE.lastIndex = 0;
 
-  while ((match = TIME_RE.exec(text)) !== null) {
+  // Safety: limit iterations to prevent infinite loops
+  let iterations = 0;
+  const MAX_ITERATIONS = 50;
+
+  while ((match = TIME_RE.exec(text)) !== null && iterations++ < MAX_ITERATIONS) {
     const full = match[0];
 
     // noon / midnight shorthand
