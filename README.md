@@ -196,11 +196,28 @@ The bot requires explicit times with hours (and optionally minutes).
 3. Verify Event Subscriptions shows "Verified ✓" in your Slack app settings
 4. Try kicking and re-inviting the bot to the channel (see above)
 
-## Files
+## Development
+
+### Running tests
+
+The time detection logic has comprehensive tests to prevent regressions:
+
+```bash
+cd supabase/functions/slack-events
+deno test timeUtils.test.ts
+```
+
+Tests cover:
+- Valid conversational times (3pm, tomorrow at 14:00, etc.)
+- Exclusion of HTTP headers and ISO timestamps
+- Edge cases and false positives
+
+### Files
 
 ```
 supabase/functions/slack-events/
-├── index.ts        # Webhook handler + Slack API calls
-├── timeUtils.ts    # Time pattern extraction + timezone conversion
-└── deno.json       # Deno configuration
+├── index.ts            # Webhook handler + Slack API calls
+├── timeUtils.ts        # Time pattern extraction + timezone conversion
+├── timeUtils.test.ts   # Test suite for time detection
+└── deno.json           # Deno configuration
 ```
