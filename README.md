@@ -149,6 +149,10 @@ This happens when you added OAuth scopes after installing the app. Slack doesn't
 2. Click **Reinstall to Workspace** at the top
 3. Copy the new Bot User OAuth Token
 4. Update your secret: `supabase secrets set SLACK_BOT_TOKEN=xoxb-new-token`
+5. In the Slack channel, kick the bot: `/remove @YourBotName`
+6. Re-invite the bot: `/invite @YourBotName`
+
+The kick + re-invite ensures Slack refreshes the bot's permissions in that channel.
 
 ### Bot isn't detecting times
 
@@ -157,6 +161,13 @@ Make sure you're using clear time formats:
 - ❌ `later`, `soon`, `in a bit`
 
 The bot requires explicit times with hours (and optionally minutes).
+
+### Bot isn't responding at all
+
+1. Check your function is deployed: `supabase functions list`
+2. Check the function logs: `supabase functions logs slack-events`
+3. Verify Event Subscriptions shows "Verified ✓" in your Slack app settings
+4. Try kicking and re-inviting the bot to the channel (see above)
 
 ## Files
 
