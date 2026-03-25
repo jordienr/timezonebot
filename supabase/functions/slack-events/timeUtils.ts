@@ -89,7 +89,7 @@ function isTimestamp(text: string, matchIndex: number, matchText: string): boole
 //   tomorrow at 3pm | today at 14:00 | Monday at 9am | next Friday 17:30
 //   at 3pm | at 14:00 | 3pm | 9:30am | noon | midnight
 const TIME_RE =
-  /(?:(today|tomorrow|next\s+\w+|\b(?:mon|tues?|wednes?|thurs?|fri|satur?|sun)(?:day)?)\s+(?:at\s+)?)?(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)|(?:(today|tomorrow|next\s+\w+|\b(?:mon|tues?|wednes?|thurs?|fri|satur?|sun)(?:day)?)\s+(?:at\s+)?)?(?:at\s+)?(\d{1,2}):(\d{2})(?!\s*(?:am|pm))|\b(noon|midnight)\b/gi;
+  /(?:(today|tomorrow|next\s+\w+|\b(?:mon|tues?|wednes?|thurs?|fri|satur?|sun)(?:day)?)\s+(?:at\s+)?)?(?:at\s+)?(?<!\d)(\d{1,2})(?::(\d{2}))?\s*(am|pm)(?!\d)|(?:(today|tomorrow|next\s+\w+|\b(?:mon|tues?|wednes?|thurs?|fri|satur?|sun)(?:day)?)\s+(?:at\s+)?)?(?:at\s+)?(?<!\d)(\d{1,2}):(\d{2})(?!\d)(?!\s*(?:am|pm))|\b(noon|midnight)\b/gi;
 
 export function extractTimes(text: string): TimeMention[] {
   // Prevent ReDoS by limiting input length

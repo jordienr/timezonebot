@@ -101,4 +101,8 @@ test("extractTimes - common false positives", () => {
   // Ratios/scores
   expect(extractTimes("The ratio is 3:1").length).toBe(0);
   expect(extractTimes("Score: 15:12").length).toBe(0);
+
+  // Numbers with colons that aren't times
+  expect(extractTimes("ID: 1234512:0012345").length).toBe(0);
+  expect(extractTimes("Hash: 98765:43210 generated").length).toBe(0);
 });
