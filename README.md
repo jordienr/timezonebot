@@ -203,14 +203,15 @@ The bot requires explicit times with hours (and optionally minutes).
 The time detection logic has comprehensive tests to prevent regressions:
 
 ```bash
-cd supabase/functions/slack-events
-deno test timeUtils.test.ts
+npm install  # Install dependencies (first time only)
+npm run test # Run all tests with vitest
 ```
 
 Tests cover:
 - Valid conversational times (3pm, tomorrow at 14:00, etc.)
-- Exclusion of HTTP headers and ISO timestamps
-- Edge cases and false positives
+- Exclusion of HTTP headers, ISO timestamps, and log formats
+- Edge cases (invalid times, deduplication)
+- False positives (version numbers like "Vue 3:00", ratios like "Score: 15:12")
 
 ### Files
 
