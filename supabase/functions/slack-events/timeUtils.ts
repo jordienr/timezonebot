@@ -6,6 +6,7 @@ export interface TimeMention {
   minute: number;
   dayOffset: number; // 0=today, 1=tomorrow, 2=day after, etc.
   weekday?: number;  // 0=Sun..6=Sat, set when a day name matched
+  timezone?: string; // Optional timezone abbreviation (EST, PST, etc.)
 }
 
 export interface Conversion {
@@ -33,6 +34,38 @@ export function mightHaveTimes(text: string): boolean {
 
 // ─── Full extraction ─────────────────────────────────────────────────────────
 const WEEKDAYS = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+
+// Common timezone abbreviations
+const TIMEZONE_ABBREVS = [
+  "EST", "EDT", "CST", "CDT", "MST", "MDT", "PST", "PDT",  // US
+  "GMT", "UTC", "BST",                                      // UK/International
+  "CET", "CEST",                                            // Central Europe
+  "IST", "JST", "KST",                                      // Asia
+  "AEST", "AEDT", "AWST"                                    // Australia
+];
+
+// Map timezone abbreviations to IANA timezone names
+const TIMEZONE_MAP: Record<string, string> = {
+  "EST": "America/New_York",
+  "EDT": "America/New_York",
+  "CST": "America/Chicago",
+  "CDT": "America/Chicago",
+  "MST": "America/Denver",
+  "MDT": "America/Denver",
+  "PST": "America/Los_Angeles",
+  "PDT": "America/Los_Angeles",
+  "GMT": "Europe/London",
+  "UTC": "UTC",
+  "BST": "Europe/London",
+  "CET": "Europe/Paris",
+  "CEST": "Europe/Paris",
+  "IST": "Asia/Kolkata",
+  "JST": "Asia/Tokyo",
+  "KST": "Asia/Seoul",
+  "AEST": "Australia/Sydney",
+  "AEDT": "Australia/Sydney",
+  "AWST": "Australia/Perth"
+};
 
 // Helper function to check if a match is a timestamp (not conversational)
 function isTimestamp(text: string, matchIndex: number, matchText: string): boolean {
@@ -88,8 +121,12 @@ function isTimestamp(text: string, matchIndex: number, matchText: string): boole
 // Matches patterns like:
 //   tomorrow at 3pm | today at 14:00 | Monday at 9am | next Friday 17:30
 //   at 3pm | at 14:00 | 3pm | 9:30am | noon | midnight
-const TIME_RE =
-  /(?:(today|tomorrow|next\s+\w+|\b(?:mon|tues?|wednes?|thurs?|fri|satur?|sun)(?:day)?)\s+(?:at\s+)?)?(?:at\s+)?(?<!\d)(\d{1,2})(?::(\d{2}))?\s*(am|pm)(?!\d)|(?:(today|tomorrow|next\s+\w+|\b(?:mon|tues?|wednes?|thurs?|fri|satur?|sun)(?:day)?)\s+(?:at\s+)?)?(?:at\s+)?(?<!\d)(\d{1,2}):(\d{2})(?!\d)(?!\s*(?:am|pm))|\b(noon|midnight)\b/gi;
+//   3pm EST | 14:00 UTC | 9:30am PST
+const TIMEZONE_PATTERN = `(?:\\s+(${TIMEZONE_ABBREVS.join("|")}))?`;
+const TIME_RE = new RegExp(
+  `(?:(today|tomorrow|next\\s+\\w+|\\b(?:mon|tues?|wednes?|thurs?|fri|satur?|sun)(?:day)?)\\s+(?:at\\s+)?)?(?:at\\s+)?(?<!\\d)(\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)(?!\\d)${TIMEZONE_PATTERN}|(?:(today|tomorrow|next\\s+\\w+|\\b(?:mon|tues?|wednes?|thurs?|fri|satur?|sun)(?:day)?)\\s+(?:at\\s+)?)?(?:at\\s+)?(?<!\\d)(\\d{1,2}):(\\d{2})(?!\\d)(?!\\s*(?:am|pm))${TIMEZONE_PATTERN}|\\b(noon|midnight)\\b`,
+  'gi'
+);
 
 export function extractTimes(text: string): TimeMention[] {
   // Prevent ReDoS by limiting input length
@@ -113,39 +150,47 @@ export function extractTimes(text: string): TimeMention[] {
     }
 
     // noon / midnight shorthand
-    if (match[8]) {
+    if (match[10]) {
       results.push({
         original: full,
-        hour: match[8].toLowerCase() === "noon" ? 12 : 0,
+        hour: match[10].toLowerCase() === "noon" ? 12 : 0,
         minute: 0,
         dayOffset: 0,
       });
       continue;
     }
 
-    // Figure out hour/minute
+    // Figure out hour/minute/timezone
     let hour: number;
     let minute = 0;
     let dayStr: string | undefined;
+    let timezone: string | undefined;
 
     if (match[2] !== undefined) {
-      // 12-hour form: group 1=day, 2=hour, 3=minute, 4=am/pm
+      // 12-hour form: group 1=day, 2=hour, 3=minute, 4=am/pm, 5=timezone
       hour = parseInt(match[2]);
       minute = match[3] ? parseInt(match[3]) : 0;
       const meridiem = match[4]?.toLowerCase();
       if (meridiem === "pm" && hour !== 12) hour += 12;
       if (meridiem === "am" && hour === 12) hour = 0;
       dayStr = match[1];
+      timezone = match[5];
     } else {
-      // 24-hour form: group 5=day, 6=hour, 7=minute
-      hour = parseInt(match[6]);
-      minute = parseInt(match[7]);
-      dayStr = match[5];
+      // 24-hour form: group 6=day, 7=hour, 8=minute, 9=timezone
+      hour = parseInt(match[7]);
+      minute = parseInt(match[8]);
+      dayStr = match[6];
+      timezone = match[9];
     }
 
     if (hour > 23 || minute > 59) continue;
 
     const mention: TimeMention = { original: full, hour, minute, dayOffset: 0 };
+
+    // Add timezone if present
+    if (timezone) {
+      mention.timezone = timezone;
+    }
 
     if (dayStr) {
       const d = dayStr.toLowerCase().trim();
@@ -163,11 +208,11 @@ export function extractTimes(text: string): TimeMention[] {
     results.push(mention);
   }
 
-  // Deduplicate by time (hour, minute, dayOffset, weekday)
+  // Deduplicate by time (hour, minute, dayOffset, weekday, timezone)
   return results.filter((m, i, arr) => {
-    const key = `${m.hour}:${m.minute}:${m.dayOffset}:${m.weekday ?? ''}`;
+    const key = `${m.hour}:${m.minute}:${m.dayOffset}:${m.weekday ?? ''}:${m.timezone ?? ''}`;
     return arr.findIndex((x) => {
-      const xKey = `${x.hour}:${x.minute}:${x.dayOffset}:${x.weekday ?? ''}`;
+      const xKey = `${x.hour}:${x.minute}:${x.dayOffset}:${x.weekday ?? ''}:${x.timezone ?? ''}`;
       return xKey === key;
     }) === i;
   });
@@ -181,9 +226,14 @@ export function convertTime(
   readerTz: string
 ): Conversion | null {
   try {
-    // Build a Date in the sender's timezone representing the mentioned time
+    // Use specified timezone if provided, otherwise use sender's timezone
+    const sourceTz = mention.timezone
+      ? (TIMEZONE_MAP[mention.timezone] || senderTz)
+      : senderTz;
+
+    // Build a Date in the source timezone representing the mentioned time
     const nowInSender = new Date(
-      new Date().toLocaleString("en-US", { timeZone: senderTz })
+      new Date().toLocaleString("en-US", { timeZone: sourceTz })
     );
 
     let targetDate = new Date(nowInSender);
@@ -198,9 +248,9 @@ export function convertTime(
       targetDate.setDate(nowInSender.getDate() + mention.dayOffset);
     }
 
-    // Re-express as a UTC timestamp, correcting for sender tz offset
-    const senderOffset = getTimezoneOffset(senderTz, targetDate);
-    const utcMs = targetDate.getTime() - senderOffset;
+    // Re-express as a UTC timestamp, correcting for source tz offset
+    const sourceOffset = getTimezoneOffset(sourceTz, targetDate);
+    const utcMs = targetDate.getTime() - sourceOffset;
     const utcDate = new Date(utcMs);
 
     // Format in reader's timezone

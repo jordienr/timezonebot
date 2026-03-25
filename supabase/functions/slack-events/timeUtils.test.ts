@@ -106,3 +106,51 @@ test("extractTimes - common false positives", () => {
   expect(extractTimes("ID: 1234512:0012345").length).toBe(0);
   expect(extractTimes("Hash: 98765:43210 generated").length).toBe(0);
 });
+
+test("extractTimes - should detect timezone abbreviations", () => {
+  // Common US timezones
+  let result = extractTimes("Meeting at 3pm EST");
+  expect(result.length).toBe(1);
+  expect(result[0].hour).toBe(15);
+  expect(result[0].timezone).toBe("EST");
+
+  result = extractTimes("Call at 2pm PST tomorrow");
+  expect(result.length).toBe(1);
+  expect(result[0].hour).toBe(14);
+  expect(result[0].timezone).toBe("PST");
+
+  result = extractTimes("Sync at 10:30am CST");
+  expect(result.length).toBe(1);
+  expect(result[0].hour).toBe(10);
+  expect(result[0].minute).toBe(30);
+  expect(result[0].timezone).toBe("CST");
+
+  // GMT/UTC
+  result = extractTimes("Release at 5pm GMT");
+  expect(result.length).toBe(1);
+  expect(result[0].timezone).toBe("GMT");
+
+  result = extractTimes("Deploy at 14:00 UTC");
+  expect(result.length).toBe(1);
+  expect(result[0].timezone).toBe("UTC");
+
+  // European
+  result = extractTimes("Meeting at 3pm CET");
+  expect(result.length).toBe(1);
+  expect(result[0].timezone).toBe("CET");
+
+  // Asian
+  result = extractTimes("Call at 9am JST");
+  expect(result.length).toBe(1);
+  expect(result[0].timezone).toBe("JST");
+});
+
+test("extractTimes - should handle DST variants", () => {
+  let result = extractTimes("Meeting at 3pm EDT");
+  expect(result.length).toBe(1);
+  expect(result[0].timezone).toBe("EDT");
+
+  result = extractTimes("Call at 2pm PDT");
+  expect(result.length).toBe(1);
+  expect(result[0].timezone).toBe("PDT");
+});

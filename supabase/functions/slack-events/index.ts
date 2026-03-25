@@ -254,48 +254,64 @@ async function processMessage(event: Record<string, string>, token: string) {
         const memberTz = memberInfo.tz;
         console.log(`Member ${memberInfo.name} timezone: ${memberTz} (sender: ${senderTz})`);
 
-        const isSameTimezone = memberTz === senderTz;
+        // Check if times need conversion (considering specified timezones)
+        const conversions = mentions
+          .map((m) => convertTime(m, senderTz, memberTz))
+          .filter(Boolean) as { original: string; converted: string }[];
+
+        if (!conversions.length) return;
+
+        // Check if any conversion actually changed the time
+        const hasActualConversion = conversions.some((c) => c.original !== c.converted);
 
         let messageBlocks;
         let times: string[];
 
-        if (isSameTimezone) {
-          // Same timezone - just list the times without conversion
+        if (!hasActualConversion) {
+          // Same effective timezone - just list the times without conversion
           times = mentions.map((m) => m.original);
           const timesList = times.map((t) => `\`${t}\``).join(", ");
+
+          // Determine the source timezone for the message
+          const hasSpecifiedTz = mentions.some((m) => m.timezone);
+          const sourceTzName = hasSpecifiedTz
+            ? mentions.find((m) => m.timezone)?.timezone
+            : senderInfo.name;
 
           messageBlocks = [
             {
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: `${timesList}\n\nSame timezone as *${senderInfo.name}* (${
-                  memberTz.replace(/_/g, " ")
-                })`,
+                text: `${timesList}\n\nSame timezone as ${
+                  hasSpecifiedTz ? sourceTzName : `*${sourceTzName}* (${memberTz.replace(/_/g, " ")})`
+                }`,
               },
             },
           ];
         } else {
-          // Different timezone - convert times
-          const conversions = mentions
-            .map((m) => convertTime(m, senderTz, memberTz))
-            .filter(Boolean) as { original: string; converted: string }[];
-
-          if (!conversions.length) return;
-
+          // Different timezone - show conversions
           times = conversions.map((c) => c.converted);
           const lines = conversions
             .map((c) => `\`${c.original}\` for you is \`${c.converted}\``)
             .join("\n");
 
+          // Determine the source for attribution
+          const hasSpecifiedTz = mentions.some((m) => m.timezone);
+          const sourceTzName = hasSpecifiedTz
+            ? mentions.find((m) => m.timezone)?.timezone
+            : senderTz.replace(/_/g, " ");
+
+          const attribution = hasSpecifiedTz
+            ? `Translated from ${sourceTzName} (sent by *${senderInfo.name}*)`
+            : `Translated from *${senderInfo.name}* who is in ${sourceTzName}`;
+
           messageBlocks = [
             {
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: `${lines}\n\nTranslated from *${senderInfo.name}* who is in ${
-                  senderTz.replace(/_/g, " ")
-                }`,
+                text: `${lines}\n\n${attribution}`,
               },
             },
           ];

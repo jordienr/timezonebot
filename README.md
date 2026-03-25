@@ -136,7 +136,21 @@ Use clear formats and the bot handles the rest:
 | `8:00` | ✅ |
 | `17:30` | ✅ |
 | `noon` / `midnight` | ✅ |
+| `3pm EST` / `14:00 PST` | ✅ With timezone |
 | `soon` / `later` | ❌ too vague |
+
+### Timezone abbreviations
+
+Specify a timezone to override your local timezone:
+
+**Supported abbreviations:**
+- **US:** EST, EDT, CST, CDT, MST, MDT, PST, PDT
+- **International:** GMT, UTC, BST
+- **Europe:** CET, CEST
+- **Asia:** IST, JST, KST
+- **Australia:** AEST, AEDT, AWST
+
+**Example:** If you say "Meeting at 3pm EST", everyone sees it converted from Eastern Time, regardless of where you are.
 
 ## Local dev
 
