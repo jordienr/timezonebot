@@ -109,13 +109,13 @@ Others see the time converted to their timezone:
 
 <img src="static/receiver_pov.png" width="600" alt="Receiver's view showing time converted to their timezone">
 
-**Thread intelligence - Sender's view**
+**Thread awareness - Sender's view**
 
 In threads, only people who participated or were @mentioned in the thread receive translations. Your confirmation message lists exactly who received the translation (not the entire channel):
 
 <img src="static/thread_intelligence_sender_pov.png" width="600" alt="Thread sender view showing only thread participants received translations">
 
-**Thread intelligence - Receiver's view**
+**Thread awareness - Receiver's view**
 
 Thread participants see clean, focused translations:
 
