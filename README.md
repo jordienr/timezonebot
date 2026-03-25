@@ -101,13 +101,13 @@ The bot uses each user's timezone from their Slack profile, so setup is instant 
 
 When you mention a time, you see who received translations:
 
-<img src="static/sender_pov.png" width="600" alt="Sender's view showing confirmation of who received time translations">
+<img src="static/receiver_pov.png" width="600" alt="Sender's view showing confirmation of who received time translations">
 
 **Channel messages - Receiver's view**
 
 Others see the time converted to their timezone:
 
-<img src="static/receiver_pov.png" width="600" alt="Receiver's view showing time converted to their timezone">
+<img src="static/sender_pov.png" width="600" alt="Receiver's view showing time converted to their timezone">
 
 **Thread intelligence - Sender's view**
 
