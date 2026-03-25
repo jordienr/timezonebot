@@ -28,6 +28,36 @@ export function mightHaveTimes(text: string): boolean {
 // ─── Full extraction ─────────────────────────────────────────────────────────
 const WEEKDAYS = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
 
+// Helper function to check if a match is a timestamp (not conversational)
+function isTimestamp(text: string, matchIndex: number, matchText: string): boolean {
+  // Get surrounding context (20 chars before and after)
+  const start = Math.max(0, matchIndex - 20);
+  const end = Math.min(text.length, matchIndex + matchText.length + 20);
+  const context = text.substring(start, end);
+
+  // Check if followed by :SS (seconds) - clear timestamp indicator
+  if (/\d{1,2}:\d{2}:\d{2}/.test(context)) {
+    return true;
+  }
+
+  // Check if part of ISO 8601 timestamp (YYYY-MM-DDTHH:MM or YYYY-MM-DD HH:MM)
+  if (/\d{4}-\d{2}-\d{2}[T\s]\d{1,2}:\d{2}/.test(context)) {
+    return true;
+  }
+
+  // Check if part of HTTP date header (Day, DD Mon YYYY HH:MM:SS GMT)
+  if (/\w{3},\s*\d{1,2}\s+\w{3}\s+\d{4}\s+\d{1,2}:\d{2}/.test(context)) {
+    return true;
+  }
+
+  // Check if in brackets [HH:MM:SS] - log timestamp
+  if (/\[\d{1,2}:\d{2}/.test(context)) {
+    return true;
+  }
+
+  return false;
+}
+
 // Matches patterns like:
 //   tomorrow at 3pm | today at 14:00 | Monday at 9am | next Friday 17:30
 //   at 3pm | at 14:00 | 3pm | 9:30am | noon | midnight
@@ -48,6 +78,12 @@ export function extractTimes(text: string): TimeMention[] {
 
   while ((match = TIME_RE.exec(text)) !== null && iterations++ < MAX_ITERATIONS) {
     const full = match[0];
+    const matchIndex = match.index;
+
+    // Skip if this looks like a timestamp, not a conversational time
+    if (isTimestamp(text, matchIndex, full)) {
+      continue;
+    }
 
     // noon / midnight shorthand
     if (match[8]) {
