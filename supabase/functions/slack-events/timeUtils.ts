@@ -22,6 +22,12 @@ const MAX_TEXT_LENGTH = 5000;
 
 export function mightHaveTimes(text: string): boolean {
   if (!text || text.length > MAX_TEXT_LENGTH) return false;
+
+  // Quick reject patterns that are definitely not conversational times
+  if (/\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}/.test(text)) return false; // ISO timestamps
+  if (/\d{1,2}:\d{2}:\d{2}\s+GMT/.test(text)) return false; // GMT timestamps
+  if (/\[\d{2}:\d{2}:\d{2}\]/.test(text)) return false; // Bracketed log timestamps
+
   return PREFILTER.test(text);
 }
 
@@ -34,6 +40,7 @@ function isTimestamp(text: string, matchIndex: number, matchText: string): boole
   const start = Math.max(0, matchIndex - 20);
   const end = Math.min(text.length, matchIndex + matchText.length + 20);
   const context = text.substring(start, end);
+  const beforeContext = text.substring(Math.max(0, matchIndex - 15), matchIndex);
 
   // Check if followed by :SS (seconds) - clear timestamp indicator
   if (/\d{1,2}:\d{2}:\d{2}/.test(context)) {
@@ -52,6 +59,26 @@ function isTimestamp(text: string, matchIndex: number, matchText: string): boole
 
   // Check if in brackets [HH:MM:SS] - log timestamp
   if (/\[\d{1,2}:\d{2}/.test(context)) {
+    return true;
+  }
+
+  // Check for ratios/scores: word or digit immediately before the time with no space or just colon
+  // e.g. "Vue 3:00" (word then space then time) or "Score: 15:12" (colon then space then time)
+  // But NOT "at 3pm" or "tomorrow at 15:00" (these have 'at' or day keywords)
+  const trimmedBefore = beforeContext.trim();
+
+  // If ends with conversational word, it's NOT a timestamp
+  if (/\b(at|tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|can|do|we|let|about|maybe|what|how)\s*$/i.test(trimmedBefore)) {
+    return false;
+  }
+
+  // Check for version pattern: "Word N:N" where N is a number
+  if (/\b[A-Za-z]+\s+$/.test(beforeContext) && /^\d{1,2}:\d{1,2}/.test(matchText)) {
+    return true;
+  }
+
+  // Check for ratio/score pattern: ends with colon (like "Score:")
+  if (/:\s*$/.test(beforeContext)) {
     return true;
   }
 
@@ -136,10 +163,14 @@ export function extractTimes(text: string): TimeMention[] {
     results.push(mention);
   }
 
-  // Deduplicate by original text
-  return results.filter(
-    (m, i, arr) => arr.findIndex((x) => x.original === m.original) === i
-  );
+  // Deduplicate by time (hour, minute, dayOffset, weekday)
+  return results.filter((m, i, arr) => {
+    const key = `${m.hour}:${m.minute}:${m.dayOffset}:${m.weekday ?? ''}`;
+    return arr.findIndex((x) => {
+      const xKey = `${x.hour}:${x.minute}:${x.dayOffset}:${x.weekday ?? ''}`;
+      return xKey === key;
+    }) === i;
+  });
 }
 
 // ─── Conversion ──────────────────────────────────────────────────────────────
