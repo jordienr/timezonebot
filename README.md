@@ -2,7 +2,13 @@
 
 Auto-translates time mentions in Slack to each reader's local timezone as a private ephemeral message. No server, no database, no AI costs — one Supabase Edge Function and Slack's built-in timezone data.
 
-## Setup
+## Prerequisites
+
+- A [Supabase](https://supabase.com) account (free tier works)
+- Admin access to a Slack workspace
+- [Supabase CLI](https://supabase.com/docs/guides/cli/getting-started) installed
+
+## Setup (5 minutes)
 
 ### 1. Create a Slack App (initial setup)
 
@@ -19,33 +25,63 @@ Auto-translates time mentions in Slack to each reader's local timezone as a priv
 
 ### 2. Deploy the Function
 
+Clone this repo and deploy to your Supabase project:
+
 ```bash
+git clone https://github.com/jordienr/timezonebot.git
+cd timezonebot
+
+# Link to your Supabase project (find PROJECT_REF in your Supabase dashboard URL)
 supabase link --project-ref YOUR_PROJECT_REF
 
+# Set your Slack credentials from step 1
 supabase secrets set SLACK_SIGNING_SECRET=your-signing-secret
 supabase secrets set SLACK_BOT_TOKEN=xoxb-your-bot-token
 
+# Deploy the function
 supabase functions deploy slack-events
 ```
 
+**Expected result:** You should see `Deployed Functions on project ...` with your function URL.
+
 ### 3. Configure Slack Event Subscriptions
 
-Now go back to your Slack app:
+Now go back to your Slack app settings:
 
-1. **Event Subscriptions** → **Enable Events**
-2. Set **Request URL** to:
+1. Go to **Event Subscriptions** → **Enable Events**
+2. Set **Request URL** to your deployed function:
    ```
-   https://YOUR_PROJECT.supabase.co/functions/v1/slack-events
+   https://YOUR_PROJECT_REF.supabase.co/functions/v1/slack-events
    ```
-   (You should see "Verified ✓" when Slack successfully connects)
-3. **Subscribe to bot events**: `message.channels`, `message.groups`
-4. **Save Changes**
+   Replace `YOUR_PROJECT_REF` with your actual Supabase project reference.
 
-### 4. Add the bot to channels
+   **Expected result:** You should see **"Verified ✓"** next to the URL (this confirms Slack can reach your function)
 
-In each channel where you want timezone translation, type: `/invite @TimezoneBot`
+3. Scroll down to **Subscribe to bot events** and add:
+   - `message.channels`
+   - `message.groups`
+
+4. Click **Save Changes** at the bottom
+
+**Important:** After saving, Slack may prompt you to reinstall the app. Click **reinstall your app** if you see this message.
+
+### 4. Use the bot
+
+In each channel where you want timezone translation, invite the bot:
+
+```
+/invite @YourBotName
+```
+
+Replace `YourBotName` with whatever you named your Slack app in step 1.
+
+**Test it:** Send a message like `Let's meet tomorrow at 3pm` and you should see a private ephemeral message with the time converted to your timezone.
 
 **Important:** The bot only listens to channels it's been explicitly invited to. It has no access to other channels in your workspace. This is a Slack security feature - you control which channels the bot can see.
+
+---
+
+**That's it!** The bot is now running. Everyone in the channel will automatically see time conversions in their own timezone.
 
 ---
 
