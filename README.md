@@ -1,6 +1,6 @@
 # 🌍 Timezone Bot
 
-Auto-translates time mentions in Slack to each reader's local timezone as a private ephemeral message. No server, no database, no AI costs — one Supabase Edge Function and Slack's built-in timezone data.
+Auto-translates time mentions in Slack to each reader's local timezone as a private ephemeral message. One Supabase Edge Function uses Slack's built-in timezone data, with a small Postgres table for personal notification preferences. No AI costs.
 
 ## Prerequisites
 
@@ -23,7 +23,7 @@ Auto-translates time mentions in Slack to each reader's local timezone as a priv
 
 ⚠️ **Important:** If you add scopes after installing the app, you MUST **Reinstall to Workspace** to get a new token with the updated permissions. Otherwise the bot will only respond to the installer.
 
-### 2. Deploy the Function
+### 2. Apply the database migration and deploy the function
 
 Clone this repo and deploy to your Supabase project:
 
@@ -38,11 +38,15 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase secrets set SLACK_SIGNING_SECRET=your-signing-secret
 supabase secrets set SLACK_BOT_TOKEN=xoxb-your-bot-token
 
-# Deploy the function
+supabase db push
 supabase functions deploy slack-events
 ```
 
 **Expected result:** You should see `Deployed Functions on project ...` with your function URL.
+
+Apply `supabase/migrations/20261127120000_timezone_bot_preferences.sql` before deploying. The migration creates the workspace/user preference table and restricts access to the backend service role.
+
+Hosted Edge Functions receive `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` automatically. Keep the service role key server-side. If you run the function outside Supabase, provide both variables yourself.
 
 ### 3. Configure Slack Event Subscriptions
 
@@ -65,7 +69,18 @@ Now go back to your Slack app settings:
 
 **Important:** After saving, Slack may prompt you to reinstall the app. Click **reinstall your app** if you see this message.
 
-### 4. Use the bot
+### 4. Configure the slash command
+
+In your Slack app settings, open **Slash Commands** → **Create New Command**:
+
+- **Command:** `/timezonebot`
+- **Request URL:** the same deployed `slack-events` URL used for Event Subscriptions
+- **Short description:** Manage your Timezone Bot messages
+- **Usage hint:** `disable | enable`
+
+Save the command and reinstall the app to your workspace if Slack prompts you to approve the `commands` permission. The function verifies Slack's signature against the original form body before reading or changing preferences.
+
+### 5. Use the bot
 
 In each channel where you want timezone translation, invite the bot:
 
@@ -121,6 +136,14 @@ Thread participants see clean, focused translations:
 
 <img src="static/thread_intelligence_receiver_pov.png" width="600" alt="Thread receiver view showing timezone conversion">
 
+## Personal preferences
+
+Run `/timezonebot disable` to stop all Timezone Bot messages to you in that workspace, including channel translations, thread translations, and sender confirmations. Run `/timezonebot enable` to receive messages again. Responses are private ephemeral messages. Both commands are safe to repeat.
+
+Your messages still generate translations for teammates who have messages enabled. Disabling messages affects only your own deliveries. Everyone receives messages by default until they disable them.
+
+An empty or unsupported command shows usage. If storage is unavailable, the command asks you to retry without claiming success.
+
 ## Supported time formats
 
 Use clear formats and the bot handles the rest:
@@ -158,6 +181,8 @@ Specify a timezone to override your local timezone:
 cp env.example .env.local
 # Fill in your SLACK_SIGNING_SECRET and SLACK_BOT_TOKEN
 
+supabase start
+supabase migration up --local
 supabase functions serve --env-file .env.local
 
 # Expose to Slack via ngrok or similar
@@ -167,17 +192,13 @@ ngrok http 54321
 
 ## Privacy & Data Handling
 
-The bot processes messages to detect time patterns, but:
-- ✅ **No database** - message content is never stored
-- ✅ **No logging** - only user IDs and timezones are logged for debugging
-- ✅ **No third parties** - only communicates with Slack APIs
-- ✅ **In-memory only** - message text is discarded after processing
-- ✅ **Minimal scope** - only requests permissions needed for time detection
-- ✅ **Opt-in per channel** - only listens to channels it's explicitly invited to
+The bot processes message text in memory to extract times and does not store messages or conversation history. It calls Slack for profiles, channel membership, thread participants, and private ephemeral delivery, and Supabase for notification preferences.
 
-Message content is processed in-memory to extract times like "3pm" or "15:00", then immediately discarded. The bot never stores conversation history.
+Postgres stores only the Slack workspace ID and user ID for each disabled preference. Enabling messages deletes that row. Preferences are scoped to the workspace, persist across deployments, and are accessible through the backend service role only. Preference lookups are batched before any recipient delivery; if a lookup fails, that event sends no messages.
 
-The bot only receives events from channels where it's been invited. It has no access to other channels in your workspace.
+Function logs include user names, user IDs, timezones, channel/thread identifiers, and Slack API status information for debugging. Treat logs as sensitive operational data and configure retention accordingly. Message content is processed in memory and is never intentionally persisted by the bot.
+
+The bot receives events only from channels where it has been invited and has no access to other channels in the workspace. Personal preferences control deliveries; they do not stop processing times in messages you send for teammates who still receive translations.
 
 ## Troubleshooting
 
@@ -227,11 +248,18 @@ Tests cover:
 - Edge cases (invalid times, deduplication)
 - False positives (version numbers like "Vue 3:00", ratios like "Score: 15:12")
 
+### End-to-end tests
+
+With Docker running, run `npm run test:e2e`. The suite starts disposable PostgreSQL 17 and PostgREST containers, applies the production migration, and serves the production webhook in Deno against a local Slack API double. It verifies signed commands, durable preferences, recipient filtering, and database access restrictions without contacting a Slack workspace.
+
+The harness obtains Deno through `npm exec` by default. To use an existing installation, run `DENO_BIN=/absolute/path/to/deno npm run test:e2e`. Docker images and the Deno package require network access on the first run.
+
 ### Files
 
 ```
 supabase/functions/slack-events/
 ├── index.ts            # Webhook handler + Slack API calls
+├── preferences.ts      # Durable workspace/user preferences
 ├── timeUtils.ts        # Time pattern extraction + timezone conversion
 ├── timeUtils.test.ts   # Test suite for time detection
 └── deno.json           # Deno configuration
