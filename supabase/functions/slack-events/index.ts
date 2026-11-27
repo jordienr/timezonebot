@@ -2,6 +2,9 @@
 // Receives Slack Event API webhooks, responds in < 3s, processes async.
 
 import { convertTime, extractTimes, mightHaveTimes } from "./timeUtils.ts";
+import { getDisabledUsers, setDisabled } from "./preferences.ts";
+
+declare const EdgeRuntime: { waitUntil(task: Promise<unknown>): void };
 
 // ─── Input validation ────────────────────────────────────────────────────────
 
@@ -29,7 +32,9 @@ async function verifySlackSignature(
   if (!timestamp || !slackSig) return false;
 
   // Reject requests older than 5 minutes
-  if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > 300) return false;
+  if (!/^\d+$/.test(timestamp) || Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) {
+    return false;
+  }
 
   const sigBase = `v0:${timestamp}:${body}`;
   const key = await crypto.subtle.importKey(
@@ -160,8 +165,13 @@ async function getThreadParticipants(
 
 // ─── Core processing ─────────────────────────────────────────────────────────
 
-async function processMessage(event: Record<string, string>, token: string) {
-  const { user: senderId, channel: channelId, text, thread_ts, ts } = event;
+async function processMessage(
+  event: Record<string, string>,
+  token: string,
+  teamId: string,
+) {
+  const { user: senderId, channel: channelId, text, thread_ts } = event;
+  if (!isValidSlackTeamId(teamId)) return;
 
   // 0. Validate Slack IDs
   if (!isValidSlackUserId(senderId)) {
@@ -232,9 +242,11 @@ async function processMessage(event: Record<string, string>, token: string) {
 
   // 5. For each target member, fetch their tz and send ephemeral
   // Batch users.info calls in parallel (max 10 at a time to avoid rate limits)
-  const otherMembers = members
-    .filter((id) => id !== senderId)
-    .filter(isValidSlackUserId);
+  const audience = [...new Set([senderId, ...members.filter(isValidSlackUserId)])];
+  const disabledUsers = await getDisabledUsers(teamId, audience);
+  const otherMembers = audience.filter((id) =>
+    id !== senderId && !disabledUsers.has(id)
+  );
 
   // Track who actually received a translation for the sender confirmation
   const translatedFor: { name: string; tz: string; conversions: string[] }[] = [];
@@ -355,7 +367,7 @@ async function processMessage(event: Record<string, string>, token: string) {
   }
 
   // 6. Send confirmation back to the sender
-  if (translatedFor.length === 0) return;
+  if (translatedFor.length === 0 || disabledUsers.has(senderId)) return;
 
   const mentionList = mentions.map((m) => `\`${m.original}\``).join(", ");
   const recipientLines = translatedFor
@@ -408,56 +420,102 @@ async function processMessage(event: Record<string, string>, token: string) {
   }
 }
 
-// ─── Handler ─────────────────────────────────────────────────────────────────
+function isValidSlackTeamId(teamId: string): boolean {
+  return /^T[A-Z0-9]{8,}$/.test(teamId);
+}
 
-Deno.serve(async (req) => {
+function commandResponse(text: string): Response {
+  return Response.json({ response_type: "ephemeral", text });
+}
+
+async function handleCommand(body: string): Promise<Response> {
+  const form = new URLSearchParams(body);
+  const teamId = form.get("team_id") || "";
+  const userId = form.get("user_id") || "";
+  if (!isValidSlackTeamId(teamId) || !isValidSlackUserId(userId)) {
+    return new Response("Bad Request", { status: 400 });
+  }
+
+  const action = form.get("text")?.trim().toLowerCase();
+  if (
+    form.get("command") !== "/timezonebot" ||
+    !["disable", "enable"].includes(action || "")
+  ) {
+    return commandResponse(
+      "Use /timezonebot disable to stop messages, or /timezonebot enable to receive them again.",
+    );
+  }
+
+  try {
+    await setDisabled(teamId, userId, action === "disable");
+    return commandResponse(
+      action === "disable"
+        ? "Timezone Bot messages are disabled for you in this workspace. Use /timezonebot enable to turn them back on."
+        : "Timezone Bot messages are enabled for you in this workspace.",
+    );
+  } catch (error) {
+    console.error("Failed to save Timezone Bot preference:", error);
+    return commandResponse(
+      "Your preference could not be confirmed. Please retry the command.",
+    );
+  }
+}
+
+export async function handleRequest(req: Request): Promise<Response> {
   const body = await req.text();
+  const isCommand = req.headers.get("content-type")?.split(";")[0].trim() ===
+    "application/x-www-form-urlencoded";
+
+  if (isCommand) {
+    if (!await verifySlackSignature(req, body)) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    return handleCommand(body);
+  }
 
   let payload;
   try {
     payload = JSON.parse(body);
-  } catch (err) {
-    console.error("Invalid JSON payload:", err);
+  } catch {
+    return new Response("Bad Request", { status: 400 });
+  }
+  if (!payload || typeof payload !== "object") {
     return new Response("Bad Request", { status: 400 });
   }
 
-  // Slack URL verification challenge (one-time setup)
-  // Handle this BEFORE signature verification to allow initial setup
   if (payload.type === "url_verification") {
-    console.log("Received URL verification challenge");
-    return new Response(JSON.stringify({ challenge: payload.challenge }), {
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ challenge: payload.challenge });
   }
 
-  // Verify the request is genuinely from Slack (after allowing url_verification)
-  const valid = await verifySlackSignature(req, body);
-  if (!valid) {
-    console.error("Invalid Slack signature");
+  if (!await verifySlackSignature(req, body)) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  // Check for duplicate events (Slack can retry)
   if (payload.event_id && isDuplicateEvent(payload.event_id)) {
-    console.log(`Duplicate event detected: ${payload.event_id}`);
-    return new Response("ok", { status: 200 });
+    return new Response("ok");
   }
 
   const event = payload.event;
-
-  // Fire-and-forget: ACK Slack immediately, do work async
   if (
     event?.type === "message" && !event.subtype && !event.bot_id && event.text
   ) {
-    const token = Deno.env.get("SLACK_BOT_TOKEN")!;
-    (async () => {
-      try {
-        await processMessage(event, token);
-      } catch (err) {
-        console.error("processMessage error:", err);
-      }
-    })();
+    const token = Deno.env.get("SLACK_BOT_TOKEN");
+    if (!token || !isValidSlackTeamId(payload.team_id)) {
+      return new Response("ok");
+    }
+    const task = processMessage(event, token, payload.team_id).catch(
+      (error) => {
+        console.error("Failed to process Timezone Bot message:", error);
+      },
+    );
+    if (typeof EdgeRuntime !== "undefined") {
+      EdgeRuntime.waitUntil(task);
+    } else {
+      await task;
+    }
   }
 
-  return new Response("ok", { status: 200 });
-});
+  return new Response("ok");
+}
+
+Deno.serve(handleRequest);
