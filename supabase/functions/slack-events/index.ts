@@ -437,18 +437,27 @@ async function handleCommand(body: string): Promise<Response> {
   }
 
   const action = form.get("text")?.trim().toLowerCase();
-  if (form.get("command") !== "/timezonebot" || !["disable", "enable"].includes(action || "")) {
-    return commandResponse("Use /timezonebot disable to stop messages, or /timezonebot enable to receive them again.");
+  if (
+    form.get("command") !== "/timezonebot" ||
+    !["disable", "enable"].includes(action || "")
+  ) {
+    return commandResponse(
+      "Use /timezonebot disable to stop messages, or /timezonebot enable to receive them again.",
+    );
   }
 
   try {
     await setDisabled(teamId, userId, action === "disable");
-    return commandResponse(action === "disable"
-      ? "Timezone Bot messages are disabled for you in this workspace. Use /timezonebot enable to turn them back on."
-      : "Timezone Bot messages are enabled for you in this workspace.");
+    return commandResponse(
+      action === "disable"
+        ? "Timezone Bot messages are disabled for you in this workspace. Use /timezonebot enable to turn them back on."
+        : "Timezone Bot messages are enabled for you in this workspace.",
+    );
   } catch (error) {
     console.error("Failed to save Timezone Bot preference:", error);
-    return commandResponse("Your preference could not be confirmed. Please retry the command.");
+    return commandResponse(
+      "Your preference could not be confirmed. Please retry the command.",
+    );
   }
 }
 
@@ -487,14 +496,18 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   const event = payload.event;
-  if (event?.type === "message" && !event.subtype && !event.bot_id && event.text) {
+  if (
+    event?.type === "message" && !event.subtype && !event.bot_id && event.text
+  ) {
     const token = Deno.env.get("SLACK_BOT_TOKEN");
     if (!token || !isValidSlackTeamId(payload.team_id)) {
       return new Response("ok");
     }
-    const task = processMessage(event, token, payload.team_id).catch((error) => {
-      console.error("Failed to process Timezone Bot message:", error);
-    });
+    const task = processMessage(event, token, payload.team_id).catch(
+      (error) => {
+        console.error("Failed to process Timezone Bot message:", error);
+      },
+    );
     if (typeof EdgeRuntime !== "undefined") {
       EdgeRuntime.waitUntil(task);
     } else {

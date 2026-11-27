@@ -250,9 +250,9 @@ Tests cover:
 
 ### End-to-end tests
 
-With Docker running, run `npm run test:e2e`. The suite starts disposable PostgreSQL 17 and PostgREST containers, applies the production migration, and serves the production webhook in Deno against a local Slack API double. It verifies signed commands, durable preferences, recipient filtering, and database access restrictions without contacting a Slack workspace.
+Install Deno and start Docker, then run `npm run test:e2e`. The suite starts disposable PostgreSQL 17 and PostgREST containers, applies the production migration, and serves the production webhook in Deno against a local Slack API double. It verifies signed commands, durable preferences, recipient filtering, and database access restrictions without contacting a Slack workspace.
 
-The harness obtains Deno through `npm exec` by default. To use an existing installation, run `DENO_BIN=/absolute/path/to/deno npm run test:e2e`. Docker images and the Deno package require network access on the first run.
+The harness uses `deno` from your PATH. To specify another installation, run `DENO_BIN=/absolute/path/to/deno npm run test:e2e`. Docker needs network access to download images on the first run.
 
 ### Files
 
